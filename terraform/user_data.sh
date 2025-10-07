@@ -381,3 +381,78 @@ MONITOREOF
 
 chmod +x /opt/gtfs-validator/monitor.py
 
+# Create schedule parser script
+cat > /opt/gtfs-validator/parse_schedule.py << 'SCHEDULEEOF'
+#!/usr/bin/env python3
+import requests
+import zipfile
+import io
+import csv
+from datetime import datetime, time
+import os
+
+GTFS_URL = os.environ.get('GTFS_STATIC_URL')
+TIMEZONE = os.environ.get('TIMEZONE', 'America/New_York')
+
+def parse_gtfs_schedule():
+    """Parse GTFS feed to determine service hours"""
+    try:
+        print(f"Downloading GTFS feed from {GTFS_URL}")
+        response = requests.get(GTFS_URL, timeout=120)
+        response.raise_for_status()
+        
+        times = []
+        
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            # Parse stop_times.txt to find service hours
+            if 'stop_times.txt' in z.namelist():
+                with z.open('stop_times.txt') as f:
+                    reader = csv.DictReader(io.TextIOWrapper(f, 'utf-8'))
+                    for row in reader:
+                        if row.get('arrival_time'):
+                            times.append(row['arrival_time'])
+        
+        if not times:
+            print("No times found in GTFS feed, using default schedule")
+            # Default: 5 AM to 11 PM
+            print("5:00|23:00")
+            return
+        
+        times.sort()
+        earliest = times[0]
+        latest = times[-1]
+        
+        # Parse time strings (handle 24+ hours)
+        def parse_time(time_str):
+            parts = time_str.split(':')
+            hours = int(parts[0]) % 24
+            minutes = int(parts[1])
+            return hours, minutes
+        
+        start_h, start_m = parse_time(earliest)
+        end_h, end_m = parse_time(latest)
+        
+        # Add 15-minute buffer before, 30-minute buffer after
+        start_m = max(0, start_m - 15)
+        if start_m < 0:
+            start_h = max(0, start_h - 1)
+            start_m = 45
+        
+        end_m = min(59, end_m + 30)
+        if end_m >= 60:
+            end_h = min(23, end_h + 1)
+            end_m = 29
+        
+        print(f"{start_h}:{start_m:02d}|{end_h}:{end_m:02d}")
+        
+    except Exception as e:
+        print(f"Error parsing GTFS schedule: {e}")
+        # Default fallback
+        print("5:00|23:00")
+
+if __name__ == '__main__':
+    parse_gtfs_schedule()
+SCHEDULEEOF
+
+chmod +x /opt/gtfs-validator/parse_schedule.py
+
