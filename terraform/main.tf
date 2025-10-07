@@ -201,3 +201,87 @@ resource "aws_sns_topic_subscription" "email" {
   endpoint  = var.alert_email
 }
 
+# Security Group
+resource "aws_security_group" "validator" {
+  name        = "${var.project_name}-sg"
+  description = "Security group for GTFS validator EC2"
+
+  ingress {
+    description = "SSH from my IP"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_address]
+  }
+
+  ingress {
+    description = "Validator web UI from my IP"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = [var.my_ip_address]
+  }
+
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-sg"
+  }
+}
+
+# EC2 Instance
+resource "aws_instance" "validator" {
+  ami                    = data.aws_ami.amazon_linux_2023.id
+  instance_type          = "t4g.micro"
+  key_name               = var.ssh_key_name
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+  vpc_security_group_ids = [aws_security_group.validator.id]
+
+  root_block_device {
+    volume_size = 8
+    volume_type = "gp3"
+    encrypted   = true
+  }
+
+  user_data = templatefile("${path.module}/user_data.sh", {
+    gtfs_static_url               = var.gtfs_static_url
+    gtfs_rt_trip_updates_url      = var.gtfs_rt_trip_updates_url
+    gtfs_rt_vehicle_positions_url = var.gtfs_rt_vehicle_positions_url
+    gtfs_rt_service_alerts_url    = var.gtfs_rt_service_alerts_url
+    s3_bucket                     = aws_s3_bucket.validation_reports.id
+    sns_topic_arn                 = aws_sns_topic.critical_alerts.arn
+    aws_region                    = var.aws_region
+    timezone                      = var.timezone
+  })
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  tags = {
+    Name = var.project_name
+  }
+
+  lifecycle {
+    ignore_changes = [user_data, ami]
+  }
+}
+
+# Elastic IP (optional - for stable IP address)
+resource "aws_eip" "validator" {
+  instance = aws_instance.validator.id
+  domain   = "vpc"
+
+  tags = {
+    Name = "${var.project_name}-eip"
+  }
+}
+
