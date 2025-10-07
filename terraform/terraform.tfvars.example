@@ -1,0 +1,24 @@
+# AWS Configuration
+aws_region   = "us-east-1"
+project_name = "gtfs-validator"
+
+# GTFS Feed URLs
+gtfs_static_url               = "https://transitfeeds.com/p/your-agency/feed/latest/download"
+gtfs_rt_trip_updates_url      = "https://your-server.com/gtfs-rt/trip-updates"
+gtfs_rt_vehicle_positions_url = "https://your-server.com/gtfs-rt/vehicle-positions"
+gtfs_rt_service_alerts_url    = ""  # Optional
+
+# Email for critical alerts
+alert_email = "your-email@example.com"
+
+# Security - Your IP for SSH access
+# Get your IP: curl https://checkip.amazonaws.com
+my_ip_address = "1.2.3.4/32"
+
+# EC2 Key Pair (must exist in AWS)
+# Create with: aws ec2 create-key-pair --key-name gtfs-validator-key --query 'KeyMaterial' --output text > ~/.ssh/gtfs-validator-key.pem
+ssh_key_name = "gtfs-validator-key"
+
+# Timezone for schedule parsing
+timezone = "America/New_York"
+
