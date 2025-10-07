@@ -456,3 +456,75 @@ SCHEDULEEOF
 
 chmod +x /opt/gtfs-validator/parse_schedule.py
 
+# Parse GTFS schedule and setup cron
+echo "=== Parsing GTFS schedule and setting up cron jobs ==="
+export $(cat /opt/gtfs-validator/.env | xargs)
+
+SCHEDULE_OUTPUT=$(/opt/gtfs-validator/parse_schedule.py 2>&1 | tail -1)
+START_TIME=$(echo $SCHEDULE_OUTPUT | cut -d'|' -f1)
+STOP_TIME=$(echo $SCHEDULE_OUTPUT | cut -d'|' -f2)
+
+START_HOUR=$(echo $START_TIME | cut -d':' -f1)
+START_MIN=$(echo $START_TIME | cut -d':' -f2)
+STOP_HOUR=$(echo $STOP_TIME | cut -d':' -f1)
+STOP_MIN=$(echo $STOP_TIME | cut -d':' -f2)
+
+echo "Service hours detected: Start $START_TIME, Stop $STOP_TIME"
+
+# Create cron jobs
+cat > /tmp/validator-cron << CRONEOF
+# GTFS Validator automated schedule
+# Generated on $(date)
+
+# Load environment variables for all jobs
+SHELL=/bin/bash
+
+# Start validator (weekdays Mon-Fri)
+$START_MIN $START_HOUR * * 1-5 cd /opt/gtfs-validator && /usr/local/bin/docker-compose up -d >> /var/log/validator-cron.log 2>&1
+
+# Stop validator (weekdays Mon-Fri)
+$STOP_MIN $STOP_HOUR * * 1-5 cd /opt/gtfs-validator && /usr/local/bin/docker-compose down >> /var/log/validator-cron.log 2>&1
+
+# Critical error monitoring (every 5 minutes, only during service hours)
+*/5 $START_HOUR-$STOP_HOUR * * 1-5 export \$(cat /opt/gtfs-validator/.env | xargs) && /opt/gtfs-validator/monitor.py monitor >> /var/log/validator-monitor.log 2>&1
+
+# Daily report export (2 AM every day)
+0 2 * * * export \$(cat /opt/gtfs-validator/.env | xargs) && /opt/gtfs-validator/monitor.py daily-report >> /var/log/validator-daily.log 2>&1
+
+# Weekly schedule update (Sunday 3 AM)
+0 3 * * 0 export \$(cat /opt/gtfs-validator/.env | xargs) && /opt/gtfs-validator/parse_schedule.py > /tmp/new_schedule.txt 2>&1 && echo "Schedule updated" >> /var/log/validator-cron.log
+CRONEOF
+
+# Install cron jobs for ec2-user
+sudo -u ec2-user crontab /tmp/validator-cron
+echo "Cron jobs installed for ec2-user"
+
+# Enable and start cron service
+systemctl enable crond
+systemctl start crond
+echo "Cron service started"
+
+# Create log rotation
+cat > /etc/logrotate.d/gtfs-validator << 'LOGROTEOF'
+/var/log/validator-*.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+}
+LOGROTEOF
+
+# Start validator immediately (optional - for testing)
+# Uncomment the next line to start validator on first boot
+# cd /opt/gtfs-validator && docker-compose up -d
+
+echo "=== GTFS Validator Setup Complete ==="
+echo "Setup completed at $(date)"
+echo "Validator will start automatically based on GTFS schedule"
+echo "Next scheduled start: Weekdays at $START_TIME"
+echo "Next scheduled stop: Weekdays at $STOP_TIME"
+echo ""
+echo "View logs with: tail -f /var/log/validator-*.log"
+echo "Manual control: cd /opt/gtfs-validator && docker-compose [up -d|down|logs]"
+
