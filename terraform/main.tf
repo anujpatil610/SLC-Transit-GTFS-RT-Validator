@@ -285,3 +285,39 @@ resource "aws_eip" "validator" {
   }
 }
 
+# Outputs
+output "instance_id" {
+  value       = aws_instance.validator.id
+  description = "EC2 instance ID"
+}
+
+output "instance_public_ip" {
+  value       = aws_eip.validator.public_ip
+  description = "Public IP address (Elastic IP)"
+}
+
+output "validator_url" {
+  value       = "http://${aws_eip.validator.public_ip}:8080"
+  description = "Validator web UI URL"
+}
+
+output "ssh_command" {
+  value       = "ssh -i ~/.ssh/${var.ssh_key_name}.pem ec2-user@${aws_eip.validator.public_ip}"
+  description = "SSH command to connect"
+}
+
+output "s3_bucket" {
+  value       = aws_s3_bucket.validation_reports.id
+  description = "S3 bucket for validation reports"
+}
+
+output "sns_topic_arn" {
+  value       = aws_sns_topic.critical_alerts.arn
+  description = "SNS topic ARN for alerts"
+}
+
+output "instance_state" {
+  value       = aws_instance.validator.instance_state
+  description = "EC2 instance state"
+}
+
