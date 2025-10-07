@@ -74,3 +74,80 @@ terraform output validator_url
 
 # Open in browser: http://<INSTANCE_IP>:8080
 ```
+
+## Operations
+
+### Check Validator Status
+```bash
+ssh -i ~/.ssh/gtfs-validator-key.pem ec2-user@<INSTANCE_IP>
+
+# Check Docker containers
+docker ps
+
+# View logs
+docker logs gtfs-validator
+
+# Check cron schedule
+crontab -l
+
+# View monitoring logs
+tail -f /var/log/validator-monitor.log
+tail -f /var/log/validator-daily.log
+```
+
+### Manual Control
+```bash
+# Start validator manually
+cd /opt/gtfs-validator
+docker-compose up -d
+
+# Stop validator
+docker-compose down
+
+# View live logs
+docker-compose logs -f
+
+# Restart validator
+docker-compose restart
+```
+
+### View Reports in S3
+```bash
+# List all reports
+aws s3 ls s3://gtfs-validator-reports-<ACCOUNT_ID>/daily-reports/ --recursive
+
+# Download specific report
+aws s3 cp s3://gtfs-validator-reports-<ACCOUNT_ID>/daily-reports/2025-10-07/validation-report.json .
+```
+
+### Update GTFS Feed URLs
+```bash
+# Edit environment file on EC2
+sudo nano /opt/gtfs-validator/.env
+
+# Restart validator to apply changes
+cd /opt/gtfs-validator
+docker-compose restart
+```
+
+## Monitoring
+
+### CloudWatch Metrics
+```bash
+# View error metrics
+aws cloudwatch get-metric-statistics \
+  --namespace GTFS/Validator \
+  --metric-name CriticalErrors \
+  --start-time 2025-10-07T00:00:00Z \
+  --end-time 2025-10-07T23:59:59Z \
+  --period 3600 \
+  --statistics Sum
+```
+
+### Email Alerts
+Critical errors trigger immediate email notifications with:
+- Error count and severity
+- Affected feed names
+- Detailed error messages
+- Entity information
+- Timestamps
