@@ -1,9 +1,25 @@
-# GTFS Realtime Validator - Ultra-Low-Cost AWS Deployment
+# St. Lawrence County Transit - GTFS Realtime Validator
 
 ## Overview
-Automated GTFS Realtime validation system running on a single EC2 instance with intelligent scheduling based on bus service hours.
+Automated GTFS Realtime validation system for **St. Lawrence County Transit** running on a single EC2 instance with intelligent scheduling based on bus service hours.
 
-**Cost: ~$8/month** (90% savings compared to full infrastructure)
+**Cost: ~$8/month** | **Monitoring: 24/7** | **Provider: [Passio3](https://passio3.com/stlawrence/passioTransit/gtfs/google_transit.zip)**
+
+### 🚀 Quick Start for SLC Transit
+
+**For St. Lawrence County Transit deployment, see [DEPLOYMENT.md](DEPLOYMENT.md) - your configuration is already set up!**
+
+Your feeds being monitored:
+- 📊 Static GTFS: `passio3.com/stlawrence/passioTransit/gtfs/google_transit.zip`
+- 🚌 Trip Updates: `passio3.com/stlawrence/passioTransit/gtfs/realtime/tripUpdates`
+- 📍 Vehicle Positions: `passio3.com/stlawrence/passioTransit/gtfs/realtime/vehiclePositions`
+- ⚠️ Service Alerts: `passio3.com/stlawrence/passioTransit/gtfs/realtime/serviceAlerts`
+
+---
+
+## General Documentation
+
+This validator can be used for any GTFS Realtime feed. Below is the general deployment guide.
 
 ## Features
 ✅ Automated start/stop based on GTFS schedule  
