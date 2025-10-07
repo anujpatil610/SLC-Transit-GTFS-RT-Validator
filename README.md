@@ -151,3 +151,85 @@ Critical errors trigger immediate email notifications with:
 - Detailed error messages
 - Entity information
 - Timestamps
+
+## Cost Breakdown
+
+| Component | Monthly Cost |
+|-----------|--------------|
+| EC2 t4g.micro (ARM) | $6.13 |
+| EBS 8GB gp3 | $0.80 |
+| Elastic IP | $0 (while attached) |
+| S3 Storage (~10GB) | $0.23 |
+| Data Transfer (~10GB) | $0.90 |
+| SNS | $0.10 |
+| CloudWatch (basic) | $0 |
+| **Total** | **~$8.16/month** |
+
+**Savings with 1-year Reserved Instance: $6.30/month**
+
+## Troubleshooting
+
+### Validator Not Starting
+```bash
+# Check Docker service
+sudo systemctl status docker
+
+# Check Docker Compose
+cd /opt/gtfs-validator
+docker-compose ps
+
+# View setup logs
+sudo cat /var/log/user-data.log
+
+# Check cron logs
+tail -f /var/log/validator-cron.log
+```
+
+### No Email Alerts
+```bash
+# Verify SNS subscription
+aws sns list-subscriptions-by-topic \
+  --topic-arn $(terraform output -raw sns_topic_arn)
+
+# Check monitor script manually
+export $(cat /opt/gtfs-validator/.env | xargs)
+/opt/gtfs-validator/monitor.py monitor
+```
+
+### Reports Not Uploading to S3
+```bash
+# Check IAM permissions
+aws sts get-caller-identity
+
+# Test S3 access from EC2
+aws s3 ls s3://gtfs-validator-reports-<ACCOUNT_ID>/
+
+# Check daily report script
+export $(cat /opt/gtfs-validator/.env | xargs)
+/opt/gtfs-validator/monitor.py daily-report
+```
+
+## Cleanup
+
+### Destroy Infrastructure
+```bash
+cd terraform
+terraform destroy
+```
+
+This removes:
+- EC2 instance
+- Elastic IP
+- Security group
+- IAM roles
+- SNS topic
+- S3 bucket (after emptying)
+
+## Support
+For issues or questions, check:
+1. `/var/log/user-data.log` - Setup logs
+2. `/var/log/validator-*.log` - Runtime logs
+3. `docker logs gtfs-validator` - Validator logs
+
+## License
+MIT
