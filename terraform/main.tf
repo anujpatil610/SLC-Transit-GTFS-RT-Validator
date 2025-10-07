@@ -155,3 +155,49 @@ resource "aws_iam_instance_profile" "ec2_profile" {
   role = aws_iam_role.ec2_role.name
 }
 
+# S3 Bucket for validation reports
+resource "aws_s3_bucket" "validation_reports" {
+  bucket = "${var.project_name}-reports-${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "validation_reports" {
+  bucket = aws_s3_bucket.validation_reports.id
+
+  rule {
+    id     = "delete-old-reports"
+    status = "Enabled"
+    expiration {
+      days = 30
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "validation_reports" {
+  bucket = aws_s3_bucket.validation_reports.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "validation_reports" {
+  bucket = aws_s3_bucket.validation_reports.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# SNS Topic for alerts
+resource "aws_sns_topic" "critical_alerts" {
+  name         = "${var.project_name}-alerts"
+  display_name = "GTFS Validation Alerts"
+}
+
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.critical_alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
