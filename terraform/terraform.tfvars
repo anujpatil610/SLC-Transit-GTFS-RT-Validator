@@ -12,7 +12,7 @@ gtfs_rt_service_alerts_url    = "https://passio3.com/stlawrence/passioTransit/gt
 
 # Email for critical alerts (primary contact)
 # Note: Additional emails can be subscribed via SNS console after deployment
-alert_email = "sonja@volunteertransportation.org"
+alert_email = "anuj@volunteertransportation.org"
 
 # Security - Your IP for SSH access
 my_ip_address = "67.249.5.27/32"
