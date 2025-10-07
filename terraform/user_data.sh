@@ -68,3 +68,316 @@ volumes:
     driver: local
 COMPOSEEOF
 
+# Create monitoring script
+cat > /opt/gtfs-validator/monitor.py << 'MONITOREOF'
+#!/usr/bin/env python3
+import boto3
+import requests
+import json
+import csv
+from datetime import datetime
+from io import StringIO
+import os
+import sys
+
+# Configuration from environment
+S3_BUCKET = os.environ.get('S3_BUCKET')
+SNS_TOPIC = os.environ.get('SNS_TOPIC_ARN')
+AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+VALIDATOR_URL = "http://localhost:8080"
+
+# Initialize AWS clients
+s3 = boto3.client('s3', region_name=AWS_REGION)
+sns = boto3.client('sns', region_name=AWS_REGION)
+cloudwatch = boto3.client('cloudwatch', region_name=AWS_REGION)
+
+def log(message):
+    """Log with timestamp"""
+    print(f"[{datetime.now().isoformat()}] {message}")
+
+def check_validator_health():
+    """Check if validator is running and accessible"""
+    try:
+        response = requests.get(f"{VALIDATOR_URL}/health", timeout=5)
+        return response.status_code == 200
+    except:
+        return False
+
+def fetch_validation_errors(minutes=5):
+    """Fetch validation errors from the last N minutes"""
+    try:
+        # Get all feeds
+        response = requests.get(f"{VALIDATOR_URL}/api/gtfs-feeds", timeout=30)
+        if response.status_code != 200:
+            log(f"Failed to fetch feeds: {response.status_code}")
+            return []
+        
+        feeds = response.json()
+        all_errors = []
+        
+        for feed in feeds:
+            feed_id = feed.get('id')
+            feed_name = feed.get('name', 'Unknown')
+            
+            # Get errors for this feed
+            errors_response = requests.get(
+                f"{VALIDATOR_URL}/api/gtfs-rt-feed/{feed_id}/errors",
+                params={'minutes': minutes},
+                timeout=30
+            )
+            
+            if errors_response.status_code == 200:
+                errors = errors_response.json()
+                
+                for error in errors:
+                    if error.get('severity') in ['CRITICAL', 'ERROR']:
+                        error['feed_name'] = feed_name
+                        error['feed_id'] = feed_id
+                        error['timestamp'] = datetime.now().isoformat()
+                        all_errors.append(error)
+        
+        return all_errors
+    
+    except Exception as e:
+        log(f"Error fetching validation errors: {e}")
+        return []
+
+def send_critical_alert(errors):
+    """Send SNS notification for critical errors"""
+    if not errors:
+        return
+    
+    # Group errors by feed
+    errors_by_feed = {}
+    for error in errors:
+        feed_name = error.get('feed_name', 'Unknown')
+        if feed_name not in errors_by_feed:
+            errors_by_feed[feed_name] = []
+        errors_by_feed[feed_name].append(error)
+    
+    # Build message
+    message = f"""
+GTFS REALTIME VALIDATION CRITICAL ALERT
+========================================
+
+Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}
+Total Critical Errors: {len(errors)}
+Affected Feeds: {len(errors_by_feed)}
+
+CRITICAL ISSUES DETECTED:
+
+"""
+    
+    for feed_name, feed_errors in errors_by_feed.items():
+        message += f"\n{'='*60}\n"
+        message += f"Feed: {feed_name}\n"
+        message += f"Error Count: {len(feed_errors)}\n"
+        message += f"{'-'*60}\n\n"
+        
+        for idx, error in enumerate(feed_errors[:10], 1):
+            message += f"{idx}. [{error.get('severity')}] {error.get('errorType', 'Unknown')}\n"
+            message += f"   Message: {error.get('errorMessage', 'No message available')}\n"
+            message += f"   Entity: {error.get('entityType', 'N/A')} (ID: {error.get('entityId', 'N/A')})\n"
+            
+            if error.get('occurrenceCount', 0) > 1:
+                message += f"   Occurrences: {error['occurrenceCount']}\n"
+            message += "\n"
+        
+        if len(feed_errors) > 10:
+            message += f"   ... and {len(feed_errors) - 10} more errors\n\n"
+    
+    message += f"\n{'='*60}\n"
+    message += "\nACTION REQUIRED:\n"
+    message += "1. Review GTFS Realtime feeds for data quality issues\n"
+    message += "2. Check validator dashboard for detailed error analysis\n"
+    message += "3. Investigate feed source systems\n"
+    message += f"\nValidator Dashboard: {VALIDATOR_URL}\n"
+    
+    try:
+        sns.publish(
+            TopicArn=SNS_TOPIC,
+            Subject=f"🚨 GTFS Validation Alert - {len(errors)} Critical Error(s)",
+            Message=message
+        )
+        log(f"Alert sent for {len(errors)} critical errors")
+    except Exception as e:
+        log(f"Error sending SNS notification: {e}")
+
+def export_daily_report():
+    """Export comprehensive daily validation report to S3"""
+    try:
+        log("Starting daily report export")
+        
+        # Fetch all feeds
+        response = requests.get(f"{VALIDATOR_URL}/api/gtfs-feeds", timeout=30)
+        if response.status_code != 200:
+            log("Failed to fetch feeds for daily report")
+            return
+        
+        feeds = response.json()
+        
+        # Collect data for report
+        report_data = {
+            'generated_at': datetime.now().isoformat(),
+            'report_type': 'daily_validation',
+            'feeds': []
+        }
+        
+        total_errors = 0
+        critical_errors = 0
+        
+        for feed in feeds:
+            feed_id = feed.get('id')
+            feed_name = feed.get('name', 'Unknown')
+            
+            # Get errors from last 24 hours
+            errors_response = requests.get(
+                f"{VALIDATOR_URL}/api/gtfs-rt-feed/{feed_id}/errors",
+                params={'hours': 24},
+                timeout=30
+            )
+            
+            if errors_response.status_code == 200:
+                errors = errors_response.json()
+                
+                feed_data = {
+                    'name': feed_name,
+                    'id': feed_id,
+                    'gtfs_url': feed.get('gtfsUrl'),
+                    'error_count': len(errors),
+                    'errors': errors
+                }
+                
+                report_data['feeds'].append(feed_data)
+                total_errors += len(errors)
+                critical_errors += sum(1 for e in errors if e.get('severity') in ['CRITICAL', 'ERROR'])
+        
+        report_data['summary'] = {
+            'total_feeds': len(feeds),
+            'total_errors': total_errors,
+            'critical_errors': critical_errors
+        }
+        
+        # Export JSON report
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        json_key = f"daily-reports/{date_str}/validation-report.json"
+        
+        s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=json_key,
+            Body=json.dumps(report_data, indent=2),
+            ContentType='application/json'
+        )
+        
+        log(f"JSON report uploaded to s3://{S3_BUCKET}/{json_key}")
+        
+        # Export CSV report
+        csv_key = f"daily-reports/{date_str}/validation-errors.csv"
+        csv_buffer = StringIO()
+        csv_writer = csv.writer(csv_buffer)
+        
+        # CSV header
+        csv_writer.writerow([
+            'Date', 'Feed Name', 'Error Type', 'Severity', 
+            'Error Message', 'Entity Type', 'Entity ID', 'Occurrence Count'
+        ])
+        
+        # CSV data
+        for feed_data in report_data['feeds']:
+            for error in feed_data['errors']:
+                csv_writer.writerow([
+                    date_str,
+                    feed_data['name'],
+                    error.get('errorType', ''),
+                    error.get('severity', ''),
+                    error.get('errorMessage', ''),
+                    error.get('entityType', ''),
+                    error.get('entityId', ''),
+                    error.get('occurrenceCount', 1)
+                ])
+        
+        s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=csv_key,
+            Body=csv_buffer.getvalue(),
+            ContentType='text/csv'
+        )
+        
+        log(f"CSV report uploaded to s3://{S3_BUCKET}/{csv_key}")
+        
+        # Publish metrics
+        publish_metrics(total_errors, critical_errors)
+        
+        log("Daily report export completed successfully")
+        
+    except Exception as e:
+        log(f"Error exporting daily report: {e}")
+
+def publish_metrics(total_errors=0, critical_errors=0):
+    """Publish CloudWatch metrics"""
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='GTFS/Validator',
+            MetricData=[
+                {
+                    'MetricName': 'TotalErrors',
+                    'Value': total_errors,
+                    'Unit': 'Count',
+                    'Timestamp': datetime.now()
+                },
+                {
+                    'MetricName': 'CriticalErrors',
+                    'Value': critical_errors,
+                    'Unit': 'Count',
+                    'Timestamp': datetime.now()
+                }
+            ]
+        )
+        log(f"Metrics published: TotalErrors={total_errors}, CriticalErrors={critical_errors}")
+    except Exception as e:
+        log(f"Error publishing metrics: {e}")
+
+def main():
+    """Main entry point"""
+    if len(sys.argv) < 2:
+        log("Usage: monitor.py [monitor|daily-report]")
+        sys.exit(1)
+    
+    action = sys.argv[1]
+    
+    if action == 'monitor':
+        log("Starting critical error monitoring")
+        
+        if not check_validator_health():
+            log("Validator is not running or not accessible")
+            sys.exit(0)
+        
+        errors = fetch_validation_errors(minutes=5)
+        
+        if errors:
+            log(f"Found {len(errors)} critical errors")
+            send_critical_alert(errors)
+            publish_metrics(len(errors), len(errors))
+        else:
+            log("No critical errors detected")
+            publish_metrics(0, 0)
+    
+    elif action == 'daily-report':
+        log("Starting daily report generation")
+        
+        if not check_validator_health():
+            log("Validator is not running - skipping daily report")
+            sys.exit(0)
+        
+        export_daily_report()
+    
+    else:
+        log(f"Unknown action: {action}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
+MONITOREOF
+
+chmod +x /opt/gtfs-validator/monitor.py
+
