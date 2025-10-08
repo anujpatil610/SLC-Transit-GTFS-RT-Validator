@@ -83,7 +83,7 @@ data "aws_ami" "amazon_linux_2023" {
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-arm64"]
+    values = ["al2023-ami-*-x86_64"]
   }
 
   filter {
@@ -238,7 +238,7 @@ resource "aws_security_group" "validator" {
 # EC2 Instance
 resource "aws_instance" "validator" {
   ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = "t4g.micro"
+  instance_type          = "t3.micro"
   key_name               = var.ssh_key_name
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
   vpc_security_group_ids = [aws_security_group.validator.id]
