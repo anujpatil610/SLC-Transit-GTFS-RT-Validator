@@ -249,7 +249,7 @@ resource "aws_instance" "validator" {
     encrypted   = true
   }
 
-  user_data = templatefile("${path.module}/user_data.sh", {
+  user_data = base64gzip(templatefile("${path.module}/user_data.sh", {
     gtfs_static_url               = var.gtfs_static_url
     gtfs_rt_trip_updates_url      = var.gtfs_rt_trip_updates_url
     gtfs_rt_vehicle_positions_url = var.gtfs_rt_vehicle_positions_url
@@ -258,7 +258,7 @@ resource "aws_instance" "validator" {
     sns_topic_arn                 = aws_sns_topic.critical_alerts.arn
     aws_region                    = var.aws_region
     timezone                      = var.timezone
-  })
+  }))
 
   metadata_options {
     http_endpoint               = "enabled"
